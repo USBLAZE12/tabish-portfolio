@@ -1,0 +1,6 @@
+{
+  "name": "Weblumes",
+  "description": "Weblumes — Web development, technical SEO, design, marketing, and AI ads engineered with Harvard Computer Science rigor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
