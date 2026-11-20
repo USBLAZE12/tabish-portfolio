@@ -5,6 +5,13 @@ import CyberGyroScene from './components/CyberGyroScene';
 const BG_IMAGE_1 = '/assets/aistudio/Gemini_Generated_Image_ptr2q2ptr2q2ptr2_99804165.jpg';
 const BG_IMAGE_2 = '/assets/aistudio/Gemini_Generated_Image_ptr2q2ptr2q2ptr2_1__477fdb5b.jpg';
 
+const DEVELOPER_WHATSAPP_NUMBER = '14423258687';
+const buildWhatsAppUrl = (message: string) =>
+  `https://api.whatsapp.com/send?phone=${DEVELOPER_WHATSAPP_NUMBER}&text=${encodeURIComponent(message)}`;
+const DEFAULT_WHATSAPP_URL = buildWhatsAppUrl(
+  "Hi Weblumes! I'd like to chat about a Web Development & SEO project."
+);
+
 const LOGO_PATH =
   'M 256 64 L 256 128 L 192.5 128 L 160 95 L 128 64 L 96 95 L 63.5 128 L 64 128 L 128 192 L 128 256 L 64.5 256 L 32 223 L 0 192 L 0 64 L 64 0 L 192 0 Z M 256 192 L 256 256 L 192.5 256 L 160 223 L 128 192 L 128 128 L 192 128 Z';
 
@@ -146,6 +153,7 @@ export default function App() {
   const [submittedInquiry, setSubmittedInquiry] = useState<{
     name: string;
     scope: string;
+    waUrl: string;
   } | null>(null);
 
   const heroRef = useRef<HTMLElement | null>(null);
@@ -570,10 +578,19 @@ export default function App() {
       return;
     }
 
+    const trimmedBrief = projectMessage.trim();
+    const waMessage = [
+      `Hi Weblumes, I'm ${trimmedName}.`,
+      `Service: ${projectScope}`,
+      `Email: ${trimmedEmail}`,
+      `Project Brief: ${trimmedBrief}`,
+    ].join('\n');
+
     setFormError(null);
     setSubmittedInquiry({
       name: trimmedName,
       scope: projectScope,
+      waUrl: buildWhatsAppUrl(waMessage),
     });
     setClientName('');
     setClientEmail('');
@@ -1059,13 +1076,25 @@ export default function App() {
 
               <div className="space-y-5 border-t border-neutral-200 pt-6">
                 <div>
-                  <p className="text-xs text-neutral-500 mb-1">Phone</p>
-                  <a
-                    href="tel:+14423258687"
-                    className="text-base font-semibold text-neutral-900 hover:text-orange-600 transition-colors tabular-nums"
-                  >
-                    +1 (442) 325 8687
-                  </a>
+                  <p className="text-xs text-neutral-500 mb-1">WhatsApp Direct</p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <a
+                      href={DEFAULT_WHATSAPP_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-base font-semibold text-neutral-900 hover:text-orange-600 transition-colors tabular-nums"
+                    >
+                      +1 (442) 325 8687
+                    </a>
+                    <a
+                      href={DEFAULT_WHATSAPP_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold text-orange-600 hover:text-orange-700 underline underline-offset-4 transition-colors"
+                    >
+                      Chat on WhatsApp
+                    </a>
+                  </div>
                 </div>
                 <div>
                   <p className="text-xs text-neutral-500 mb-1">Email</p>
@@ -1089,14 +1118,19 @@ export default function App() {
               {submittedInquiry ? (
                 <div className="py-8">
                   <p className="text-xs font-semibold tracking-[0.12em] uppercase text-orange-600 mb-2">
-                    Request Received
+                    Ready for WhatsApp
                   </p>
                   <h3 className="text-xl font-semibold text-neutral-900 mb-3">
                     Thank you, {submittedInquiry.name}.
                   </h3>
                   <p className="text-sm text-neutral-600 leading-relaxed mb-6">
-                    Your inquiry for <span className="font-semibold text-neutral-900">{submittedInquiry.scope}</span> is prepared. For immediate priority, call{' '}
-                    <a href="tel:+14423258687" className="underline font-medium text-neutral-900">
+                    Your inquiry for <span className="font-semibold text-neutral-900">{submittedInquiry.scope}</span> is formatted and ready. Start a direct WhatsApp chat with the developer at{' '}
+                    <a
+                      href={submittedInquiry.waUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline font-medium text-neutral-900 tabular-nums"
+                    >
                       +1 (442) 325 8687
                     </a>{' '}
                     or email{' '}
@@ -1105,13 +1139,23 @@ export default function App() {
                     </a>
                     .
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setSubmittedInquiry(null)}
-                    className="bg-neutral-900 text-white text-sm font-semibold px-6 py-2.5 rounded-full hover:bg-neutral-800 transition-colors cursor-pointer"
-                  >
-                    Send Another Note
-                  </button>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <a
+                      href={submittedInquiry.waUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-orange-600 text-white text-sm font-semibold px-6 py-2.5 rounded-full hover:bg-orange-700 transition-colors"
+                    >
+                      Open WhatsApp Chat
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => setSubmittedInquiry(null)}
+                      className="bg-neutral-900 text-white text-sm font-semibold px-6 py-2.5 rounded-full hover:bg-neutral-800 transition-colors cursor-pointer"
+                    >
+                      Send Another Note
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <form onSubmit={handleInquirySubmit} noValidate className="space-y-5">
@@ -1184,14 +1228,19 @@ export default function App() {
                   )}
 
                   <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
-                    <span className="text-xs text-neutral-500">
-                      Direct line: +1 (442) 325 8687
-                    </span>
+                    <a
+                      href={DEFAULT_WHATSAPP_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-neutral-600 hover:text-orange-600 transition-colors tabular-nums underline underline-offset-4"
+                    >
+                      WhatsApp Direct: +1 (442) 325 8687
+                    </a>
                     <button
                       type="submit"
                       className="bg-neutral-900 text-white text-sm font-semibold px-7 py-3 rounded-full hover:bg-neutral-800 transition-colors cursor-pointer"
                     >
-                      Submit Request
+                      Prepare WhatsApp Inquiry
                     </button>
                   </div>
                 </form>
@@ -1212,8 +1261,13 @@ export default function App() {
             <span>Harvard University CS</span>
           </div>
           <div className="flex flex-wrap items-center gap-4">
-            <a href="tel:+14423258687" className="hover:text-neutral-900 transition-colors tabular-nums">
-              +1 (442) 325 8687
+            <a
+              href={DEFAULT_WHATSAPP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-neutral-900 transition-colors tabular-nums"
+            >
+              WhatsApp · +1 (442) 325 8687
             </a>
             <a href="mailto:weblumess@gmail.com" className="hover:text-neutral-900 transition-colors">
               weblumess@gmail.com
