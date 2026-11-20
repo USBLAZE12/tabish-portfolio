@@ -150,8 +150,9 @@ export default function App() {
 
   const heroRef = useRef<HTMLElement | null>(null);
   const gridPatternRef = useRef<SVGPatternElement | null>(null);
-  const revealLayerRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fluidCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cursorRingRef = useRef<HTMLDivElement | null>(null);
+  const cursorDotRef = useRef<HTMLDivElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   const scrollToSection = (sectionId: string, focusForm = false) => {
@@ -170,7 +171,7 @@ export default function App() {
 
   useEffect(() => {
     const heroEl = heroRef.current;
-    const canvas = canvasRef.current;
+    const canvas = fluidCanvasRef.current;
     if (!heroEl || !canvas) return;
 
     const ctx = canvas.getContext('2d');
@@ -178,87 +179,178 @@ export default function App() {
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+    let cssWidth = heroEl.clientWidth || window.innerWidth;
+    let cssHeight = heroEl.clientHeight || window.innerHeight;
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+
     const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      cssWidth = heroEl.clientWidth || window.innerWidth;
+      cssHeight = heroEl.clientHeight || window.innerHeight;
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
+      canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
     };
     resizeCanvas();
 
-    // Clear mask initially so reveal layer starts invisible
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (revealLayerRef.current) {
-      const emptyUrl = canvas.toDataURL();
-      revealLayerRef.current.style.maskImage = `url(${emptyUrl})`;
-      revealLayerRef.current.style.webkitMaskImage = `url(${emptyUrl})`;
+    const revealImg = new Image();
+    let imgLoaded = false;
+    revealImg.onload = () => {
+      imgLoaded = true;
+    };
+    revealImg.src = BG_IMAGE_2;
+
+    interface FluidDrop {
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      r: number;
+      life: number;
+      seed: number;
     }
 
+    const drops: FluidDrop[] = [];
     const targetCursor = { x: -999, y: -999 };
     const smoothCursor = { x: -999, y: -999 };
+    const ringCursor = { x: -999, y: -999 };
     const targetGrid = { x: 0, y: 0 };
     const smoothGrid = { x: 0, y: 0 };
 
-    let lastDrawnX = -999;
-    let lastDrawnY = -999;
-    let hasMoved = false;
+    let isInsideHero = false;
+    let isDragging = false;
+    let currentRadius = 0;
+    let lastSpawnX = -999;
+    let lastSpawnY = -999;
+    let lastTime = performance.now();
     let rafId = 0;
+    let wasActive = false;
 
-    const handleMouseMove = (e: MouseEvent) => {
-      hasMoved = true;
-      targetCursor.x = e.clientX;
-      targetCursor.y = e.clientY;
+    const updateTargetFromPointer = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
 
-      const normX = window.innerWidth > 0 ? e.clientX / window.innerWidth : 0.5;
-      const normY = window.innerHeight > 0 ? e.clientY / window.innerHeight : 0.5;
+      const localX = ((clientX - rect.left) / rect.width) * cssWidth;
+      const localY = ((clientY - rect.top) / rect.height) * cssHeight;
+
+      if (!isInsideHero) {
+        // Snap smoothly near entry point instead of sweeping from -999
+        smoothCursor.x = localX;
+        smoothCursor.y = localY;
+        ringCursor.x = localX;
+        ringCursor.y = localY;
+        lastSpawnX = localX;
+        lastSpawnY = localY;
+      }
+
+      isInsideHero = true;
+      targetCursor.x = localX;
+      targetCursor.y = localY;
+
+      const normX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const normY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
       targetGrid.x = (normX - 0.5) * 16;
       targetGrid.y = (normY - 0.5) * 16;
     };
 
-    const handleMouseLeave = () => {
-      targetCursor.x = -999;
-      targetCursor.y = -999;
+    const handlePointerMove = (e: PointerEvent) => {
+      const heroRect = heroEl.getBoundingClientRect();
+      const inside =
+        e.clientX >= heroRect.left &&
+        e.clientX <= heroRect.right &&
+        e.clientY >= heroRect.top &&
+        e.clientY <= heroRect.bottom;
+
+      if (inside) {
+        updateTargetFromPointer(e.clientX, e.clientY);
+      } else if (isInsideHero) {
+        isInsideHero = false;
+        isDragging = false;
+        targetGrid.x = 0;
+        targetGrid.y = 0;
+      }
+    };
+
+    const handlePointerDown = (e: PointerEvent) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      const heroRect = heroEl.getBoundingClientRect();
+      if (
+        e.clientX >= heroRect.left &&
+        e.clientX <= heroRect.right &&
+        e.clientY >= heroRect.top &&
+        e.clientY <= heroRect.bottom
+      ) {
+        isDragging = true;
+        updateTargetFromPointer(e.clientX, e.clientY);
+        // Spawn a burst droplet at drag start
+        drops.push({
+          x: targetCursor.x,
+          y: targetCursor.y,
+          vx: 0,
+          vy: 0,
+          r: 145,
+          life: 1,
+          seed: Math.random() * Math.PI * 2,
+        });
+        if (drops.length > 20) drops.shift();
+      }
+    };
+
+    const handlePointerUp = () => {
+      isDragging = false;
+    };
+
+    const handlePointerLeave = () => {
+      isInsideHero = false;
+      isDragging = false;
       targetGrid.x = 0;
       targetGrid.y = 0;
     };
 
-    const drawSpotlight = (x: number, y: number) => {
-      const w = canvas.width;
-      const h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
+    const drawFluidBlob = (x: number, y: number, rx: number, ry: number, angle: number, alpha: number) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.scale(1, ry / Math.max(1, rx));
 
-      if (x > -280 && y > -280 && x < w + 280 && y < h + 280) {
-        const radius = 260;
-        const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
-        grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-        grad.addColorStop(0.4, 'rgba(255, 255, 255, 1)');
-        grad.addColorStop(0.6, 'rgba(255, 255, 255, 0.75)');
-        grad.addColorStop(0.75, 'rgba(255, 255, 255, 0.4)');
-        grad.addColorStop(0.88, 'rgba(255, 255, 255, 0.12)');
-        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      const grad = ctx.createRadialGradient(0, 0, rx * 0.12, 0, 0, rx);
+      grad.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
+      grad.addColorStop(0.45, `rgba(255, 255, 255, ${alpha * 0.92})`);
+      grad.addColorStop(0.72, `rgba(255, 255, 255, ${alpha * 0.48})`);
+      grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
 
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      if (revealLayerRef.current) {
-        const dataUrl = canvas.toDataURL();
-        revealLayerRef.current.style.maskImage = `url(${dataUrl})`;
-        revealLayerRef.current.style.webkitMaskImage = `url(${dataUrl})`;
-      }
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, rx, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     };
 
-    const tick = () => {
+    const tick = (now: number) => {
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+      const t = now * 0.001;
+
+      const prevX = smoothCursor.x;
+      const prevY = smoothCursor.y;
+
       if (prefersReducedMotion) {
         smoothCursor.x = targetCursor.x;
         smoothCursor.y = targetCursor.y;
+        ringCursor.x = targetCursor.x;
+        ringCursor.y = targetCursor.y;
         smoothGrid.x = targetGrid.x;
         smoothGrid.y = targetGrid.y;
       } else {
-        smoothCursor.x += (targetCursor.x - smoothCursor.x) * 0.1;
-        smoothCursor.y += (targetCursor.y - smoothCursor.y) * 0.1;
-        smoothGrid.x += (targetGrid.x - smoothGrid.x) * 0.06;
-        smoothGrid.y += (targetGrid.y - smoothGrid.y) * 0.06;
+        const cursorFactor = 1 - Math.exp(-12 * dt);
+        const ringFactor = 1 - Math.exp(-18 * dt);
+        const gridFactor = 1 - Math.exp(-4.2 * dt);
+
+        smoothCursor.x += (targetCursor.x - smoothCursor.x) * cursorFactor;
+        smoothCursor.y += (targetCursor.y - smoothCursor.y) * cursorFactor;
+        ringCursor.x += (targetCursor.x - ringCursor.x) * ringFactor;
+        ringCursor.y += (targetCursor.y - ringCursor.y) * ringFactor;
+        smoothGrid.x += (targetGrid.x - smoothGrid.x) * gridFactor;
+        smoothGrid.y += (targetGrid.y - smoothGrid.y) * gridFactor;
       }
 
       if (gridPatternRef.current) {
@@ -266,27 +358,173 @@ export default function App() {
         gridPatternRef.current.setAttribute('y', smoothGrid.y.toFixed(2));
       }
 
-      const movedDist =
-        Math.abs(smoothCursor.x - lastDrawnX) + Math.abs(smoothCursor.y - lastDrawnY);
+      const vx = smoothCursor.x - prevX;
+      const vy = smoothCursor.y - prevY;
+      const speed = Math.hypot(vx, vy);
+      const moveAngle = speed > 0.25 ? Math.atan2(vy, vx) : 0;
 
-      if (hasMoved && movedDist > 0.2) {
-        drawSpotlight(smoothCursor.x, smoothCursor.y);
-        lastDrawnX = smoothCursor.x;
-        lastDrawnY = smoothCursor.y;
+      // Smoothly expand/contract fluid radius on enter/drag/leave
+      const targetRadius = isInsideHero ? (isDragging ? 255 : 185) + Math.min(speed * 1.4, 48) : 0;
+      const radiusFactor = prefersReducedMotion ? 1 : 1 - Math.exp(-9 * dt);
+      currentRadius += (targetRadius - currentRadius) * radiusFactor;
+
+      // Spawn organic fluid trail droplets along cursor path
+      if (isInsideHero && !prefersReducedMotion) {
+        const distFromSpawn = Math.hypot(smoothCursor.x - lastSpawnX, smoothCursor.y - lastSpawnY);
+        if (distFromSpawn > (isDragging ? 7 : 12)) {
+          drops.push({
+            x: smoothCursor.x,
+            y: smoothCursor.y,
+            vx: vx * 0.22,
+            vy: vy * 0.22,
+            r: (isDragging ? 135 : 92) + Math.min(speed * 1.1, 40),
+            life: 1,
+            seed: t * 2.5 + drops.length,
+          });
+          if (drops.length > 18) drops.shift();
+          lastSpawnX = smoothCursor.x;
+          lastSpawnY = smoothCursor.y;
+        }
+      }
+
+      // Advance & prune fluid trail drops
+      const decayRate = isDragging ? 1.1 : 1.85;
+      for (let i = drops.length - 1; i >= 0; i--) {
+        const d = drops[i];
+        d.x += d.vx * (dt * 60);
+        d.y += d.vy * (dt * 60);
+        d.vx *= 0.92;
+        d.vy *= 0.92;
+        d.life -= dt * decayRate;
+        if (d.life <= 0) {
+          drops.splice(i, 1);
+        }
+      }
+
+      // Update custom cursor ring & dot transforms (compositor-only, zero React re-renders)
+      if (cursorRingRef.current && cursorDotRef.current) {
+        if (isInsideHero && !prefersReducedMotion) {
+          const stretch = 1 + Math.min(speed * 0.015, 0.42);
+          const squash = 1 / Math.sqrt(stretch);
+          const dragScale = isDragging ? 1.38 : 1;
+          cursorRingRef.current.style.opacity = '1';
+          cursorRingRef.current.style.transform = `translate3d(${ringCursor.x}px, ${ringCursor.y}px, 0) translate(-50%, -50%) rotate(${moveAngle.toFixed(3)}rad) scale(${(stretch * dragScale).toFixed(3)}, ${(squash * dragScale).toFixed(3)})`;
+          cursorRingRef.current.style.borderColor = isDragging
+            ? 'rgba(251, 146, 60, 0.92)'
+            : 'rgba(255, 255, 255, 0.65)';
+
+          cursorDotRef.current.style.opacity = '1';
+          cursorDotRef.current.style.transform = `translate3d(${targetCursor.x}px, ${targetCursor.y}px, 0) translate(-50%, -50%) scale(${isDragging ? 1.5 : 1})`;
+        } else {
+          cursorRingRef.current.style.opacity = '0';
+          cursorDotRef.current.style.opacity = '0';
+        }
+      }
+
+      const isActive = currentRadius > 1.5 || drops.length > 0;
+      if (imgLoaded && (isActive || wasActive)) {
+        wasActive = isActive;
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+        if (isActive) {
+          ctx.globalCompositeOperation = 'source-over';
+
+          // 1. Draw main velocity-stretched fluid head + oscillating perimeter lobes
+          if (currentRadius > 1.5) {
+            const stretch = prefersReducedMotion ? 1 : 1 + Math.min(speed * 0.012, 0.36);
+            const squash = 1 / Math.sqrt(stretch);
+            drawFluidBlob(
+              smoothCursor.x,
+              smoothCursor.y,
+              currentRadius * stretch,
+              currentRadius * squash,
+              moveAngle,
+              1
+            );
+
+            if (!prefersReducedMotion) {
+              for (let k = 0; k < 5; k++) {
+                const lobePhase = t * (2.6 + k * 0.35) + k * 1.256;
+                const offsetR = currentRadius * (0.28 + Math.sin(t * 2.1 + k) * 0.08);
+                const lx = smoothCursor.x + Math.cos(lobePhase) * offsetR;
+                const ly = smoothCursor.y + Math.sin(lobePhase * 0.92) * offsetR;
+                const lr = currentRadius * (0.58 + Math.cos(t * 3.1 + k) * 0.07);
+                drawFluidBlob(lx, ly, lr, lr, 0, 0.88);
+              }
+            }
+          }
+
+          // 2. Draw organic decaying webfluid trail blobs
+          for (const d of drops) {
+            const wobble = Math.sin(t * 5 + d.seed) * 6;
+            const r = Math.max(8, d.r * (0.45 + d.life * 0.55) + wobble);
+            drawFluidBlob(d.x, d.y, r, r * 0.92, d.seed, d.life * 0.85);
+          }
+
+          // 3. Composite BG_IMAGE_2 strictly inside the fluid mask (exact bg-center bg-cover alignment)
+          ctx.globalCompositeOperation = 'source-in';
+          const imgRatio = revealImg.naturalWidth / revealImg.naturalHeight;
+          const canvasRatio = cssWidth / cssHeight;
+          let dw = cssWidth;
+          let dh = cssHeight;
+          let dx = 0;
+          let dy = 0;
+          if (imgRatio > canvasRatio) {
+            dh = cssHeight;
+            dw = cssHeight * imgRatio;
+            dx = (cssWidth - dw) * 0.5;
+          } else {
+            dw = cssWidth;
+            dh = cssWidth / imgRatio;
+            dy = (cssHeight - dh) * 0.5;
+          }
+          ctx.drawImage(revealImg, dx, dy, dw, dh);
+
+          // 4. Subtle warm-amber fluid energy aura along the feathered boundary
+          if (currentRadius > 4) {
+            ctx.globalCompositeOperation = 'destination-over';
+            const auraR = currentRadius * 1.14;
+            const auraGrad = ctx.createRadialGradient(
+              smoothCursor.x,
+              smoothCursor.y,
+              currentRadius * 0.42,
+              smoothCursor.x,
+              smoothCursor.y,
+              auraR
+            );
+            auraGrad.addColorStop(0, 'rgba(255, 110, 28, 0.34)');
+            auraGrad.addColorStop(0.65, 'rgba(234, 88, 12, 0.16)');
+            auraGrad.addColorStop(1, 'rgba(234, 88, 12, 0)');
+            ctx.fillStyle = auraGrad;
+            ctx.beginPath();
+            ctx.arc(smoothCursor.x, smoothCursor.y, auraR, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.globalCompositeOperation = 'source-over';
+        }
+
+        ctx.restore();
       }
 
       rafId = window.requestAnimationFrame(tick);
     };
 
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    document.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerdown', handlePointerDown, { passive: true });
+    window.addEventListener('pointerup', handlePointerUp, { passive: true });
+    document.addEventListener('mouseleave', handlePointerLeave);
     window.addEventListener('resize', resizeCanvas, { passive: true });
     rafId = window.requestAnimationFrame(tick);
 
     return () => {
       window.cancelAnimationFrame(rafId);
-      window.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseleave', handleMouseLeave);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('pointerup', handlePointerUp);
+      document.removeEventListener('mouseleave', handlePointerLeave);
       window.removeEventListener('resize', resizeCanvas);
     };
   }, []);
@@ -459,7 +697,7 @@ export default function App() {
       <section
         id="overview"
         ref={heroRef}
-        className="relative h-[100dvh] w-full overflow-hidden bg-[#1b0500]"
+        className="relative h-[100dvh] w-full overflow-hidden bg-[#1b0500] select-none"
       >
         {/* Layer 1 (z-0): Parallax 48px Grid SVG */}
         <svg
@@ -495,22 +733,26 @@ export default function App() {
           aria-hidden="true"
         />
 
-        {/* Layer 3 (z-30): Cursor spotlight reveal layer (BG_IMAGE_2) */}
-        <div
-          ref={revealLayerRef}
-          className="ken-burns absolute inset-0 z-30 bg-center bg-cover pointer-events-none"
-          style={{
-            backgroundImage: `url('${BG_IMAGE_2}')`,
-            maskSize: '100% 100%',
-            WebkitMaskSize: '100% 100%',
-            maskRepeat: 'no-repeat',
-            WebkitMaskRepeat: 'no-repeat',
-          }}
+        {/* Layer 3 (z-30): Synced 60fps webfluid canvas reveal (BG_IMAGE_2) */}
+        <canvas
+          ref={fluidCanvasRef}
+          className="ken-burns absolute inset-0 z-30 w-full h-full pointer-events-none"
           aria-hidden="true"
         />
 
-        {/* Hidden full-window canvas for radial spotlight mask generation */}
-        <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
+        {/* Smooth velocity-reactive custom cursor follower inside hero */}
+        <div
+          ref={cursorRingRef}
+          aria-hidden="true"
+          className="hidden md:block absolute top-0 left-0 z-50 w-10 h-10 rounded-full border border-white/65 pointer-events-none opacity-0 transition-[opacity,border-color] duration-200"
+          style={{ willChange: 'transform, opacity' }}
+        />
+        <div
+          ref={cursorDotRef}
+          aria-hidden="true"
+          className="hidden md:block absolute top-0 left-0 z-50 w-1.5 h-1.5 rounded-full bg-white pointer-events-none opacity-0 transition-opacity duration-150"
+          style={{ willChange: 'transform, opacity' }}
+        />
 
         {/* Subtle directional contrast scrim so bottom-left white copy remains crisp */}
         <div
